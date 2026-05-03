@@ -3,6 +3,9 @@ from chromadb.config import Settings
 from src.vectordb.base import BaseVectorDB
 from src.embeddings.base import Vector
 import config
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ChromaStore(BaseVectorDB):
@@ -25,7 +28,7 @@ class ChromaStore(BaseVectorDB):
 
     def __init__(self) -> None:
         if config.DEBUG:
-            print(f"[DEBUG] Initializing ChromaDB at : {config.CHROMA_PATH}")
+            logger.debug(f"Initializing ChromaDB at : {config.CHROMA_PATH}")
 
         self._client = chromadb.PersistentClient(
             path=config.CHROMA_PATH,
@@ -38,8 +41,8 @@ class ChromaStore(BaseVectorDB):
         )
 
         if config.DEBUG:
-            print(f"[DEBUG] Collection    : {config.CHROMA_COLLECTION}")
-            print(f"[DEBUG] Chunks stored : {self.count()}")
+            logger.debug(f"Collection    : {config.CHROMA_COLLECTION}")
+            logger.debug(f"Chunks stored : {self.count()}")
 
 
     def name(self) -> str:
@@ -76,7 +79,7 @@ class ChromaStore(BaseVectorDB):
 
         if not chunks:
             if config.DEBUG:
-                print("[DEBUG] upsert called with empty list — skipping.")
+                logger.debug("Upsert called with empty list — skipping.")
             return
 
         _validate_vector_dimensions(vectors)
@@ -104,12 +107,12 @@ class ChromaStore(BaseVectorDB):
             )
 
             if config.DEBUG:
-                print(
-                    f"[DEBUG] Upserted batch {batch_index + 1}/{num_batches} "
+                logger.debug(
+                    f"Upserted batch {batch_index + 1}/{num_batches} "
                     f"({len(batch_chunks)} chunks) → total stored: {self.count()}"
                 )
 
-        print(f"[INFO] Upsert complete — {total} chunk(s) written to {self.name()}")
+        logger.info(f"Upsert complete — {total} chunk(s) written to {self.name()}")
 
     def query(
         self,
@@ -139,7 +142,7 @@ class ChromaStore(BaseVectorDB):
 
         if self.count() == 0:
             if config.DEBUG:
-                print("[DEBUG] query called on empty collection — returning []")
+                logger.debug("Query called on empty collection — returning []")
             return []
 
         query_params = {
@@ -171,8 +174,8 @@ class ChromaStore(BaseVectorDB):
 
         if config.DEBUG:
             for r in results:
-                print(
-                    f"[DEBUG] Retrieved → {r['id']} "
+                logger.debug(
+                    f"Retrieved → {r['id']} "
                     f"| score: {r['score']} "
                     f"| page: {r['metadata'].get('page_number')} "
                     f"| file: {r['metadata'].get('filename')}"
@@ -198,20 +201,20 @@ class ChromaStore(BaseVectorDB):
 
         Safe to call even if collection does not exist.
         """
-        print(f"[WARN] Resetting collection '{config.CHROMA_COLLECTION}' — all data will be lost.")
+        logger.warning(f"Resetting collection '{config.CHROMA_COLLECTION}' — all data will be lost.")
 
         try:
             self._client.delete_collection(name=config.CHROMA_COLLECTION)
         except Exception as e:
             if config.DEBUG:
-                print(f"[DEBUG] Delete collection skipped: {e}")
+                logger.debug(f"Delete collection skipped: {e}")
 
         self._collection = self._client.get_or_create_collection(
             name=config.CHROMA_COLLECTION,
             metadata={"hnsw:space": "cosine"}
         )
 
-        print(f"[INFO] Collection reset complete. Chunks stored: {self.count()}")
+        logger.info(f"Collection reset complete. Chunks stored: {self.count()}")
 
 
 def _validate_vector_dimensions(vectors: list[Vector]) -> None:

@@ -2,6 +2,9 @@ import torch
 from sentence_transformers import SentenceTransformer
 from src.embeddings.base import BaseEmbedder, Vector, Vectors
 import config
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SentenceEmbedder(BaseEmbedder):
@@ -26,8 +29,8 @@ class SentenceEmbedder(BaseEmbedder):
         self._device = self._resolve_device(config.EMBED_DEVICE)
 
         if config.DEBUG:
-            print(f"[DEBUG] Loading sentence-transformers model : {model_name}")
-            print(f"[DEBUG] Device                              : {self._device}")
+            logger.debug(f"Loading sentence-transformers model : {model_name}")
+            logger.debug(f"Device                              : {self._device}")
 
         try:
             self._model = SentenceTransformer(model_name, device=self._device)
@@ -40,9 +43,9 @@ class SentenceEmbedder(BaseEmbedder):
         self._probed_dim: int | None = None   # cache for unknown model dimensions
 
         if config.DEBUG:
-            print(f"[DEBUG] Model loaded    : {self.name()}")
-            print(f"[DEBUG] Dimension       : {self.dimension()}")
-            print(f"[DEBUG] Batch size      : {config.EMBED_BATCH_SIZE}")
+            logger.debug(f"Model loaded    : {self.name()}")
+            logger.debug(f"Dimension       : {self.dimension()}")
+            logger.debug(f"Batch size      : {config.EMBED_BATCH_SIZE}")
 
 
     def name(self) -> str:
@@ -94,8 +97,8 @@ class SentenceEmbedder(BaseEmbedder):
             self._validate_text(text, index=i)
 
         if config.DEBUG:
-            print(f"[DEBUG] Embedding batch of {len(texts)} chunk(s) "
-                  f"[batch_size={config.EMBED_BATCH_SIZE}]...")
+            logger.debug(f"Embedding batch of {len(texts)} chunk(s) "
+                         f"[batch_size={config.EMBED_BATCH_SIZE}]...")
 
         embeddings = self._model.encode(
             texts,
@@ -124,14 +127,14 @@ class SentenceEmbedder(BaseEmbedder):
             return self._probed_dim
 
         if config.DEBUG:
-            print(f"[DEBUG] '{self._model_name}' not in known dimensions "
-                  f"table — probing model...")
+            logger.debug(f"'{self._model_name}' not in known dimensions "
+                         f"table — probing model...")
 
         probe = self._model.encode("probe", convert_to_numpy=True)
         self._probed_dim = len(probe)
 
         if config.DEBUG:
-            print(f"[DEBUG] Probed dimension: {self._probed_dim} (cached)")
+            logger.debug(f"Probed dimension: {self._probed_dim} (cached)")
 
         return self._probed_dim
     

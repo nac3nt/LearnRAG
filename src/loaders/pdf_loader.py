@@ -2,6 +2,9 @@ import re
 from pathlib import Path
 from pypdf import PdfReader
 import config
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def load_pdf(filepath: str | Path) -> list[dict]:
@@ -36,12 +39,12 @@ def load_pdf(filepath: str | Path) -> list[dict]:
             text = page.extract_text()
         except Exception as e:
             if config.DEBUG:
-                print(f"[DEBUG] Could not extract text from page {page_index + 1} in {filename}: {e}")
+                logger.debug(f"Could not extract text from page {page_index + 1} in {filename}: {e}")
             continue
 
         if not text or not text.strip():
             if config.DEBUG:
-                print(f"[DEBUG] Skipping empty page {page_index + 1} in {filename}")
+                logger.debug(f"Skipping empty page {page_index + 1} in {filename}")
             continue
 
         text = _normalize_text(text)
@@ -53,7 +56,7 @@ def load_pdf(filepath: str | Path) -> list[dict]:
         })
 
     if config.DEBUG:
-        print(f"[DEBUG] Loaded {len(pages)} pages from {filename}")
+        logger.debug(f"Loaded {len(pages)} pages from {filename}")
 
     return pages
 
@@ -79,7 +82,7 @@ def load_all_pdfs(docs_path: str | Path = config.DOCS_PATH) -> list[dict]:
         raise ValueError(f"No PDF files found in: {docs_path}")
 
     if config.DEBUG:
-        print(f"[DEBUG] Found {len(pdf_files)} PDF(s) in {docs_path}")
+        logger.debug(f"Found {len(pdf_files)} PDF(s) in {docs_path}")
 
     all_pages = []
 
@@ -88,9 +91,9 @@ def load_all_pdfs(docs_path: str | Path = config.DOCS_PATH) -> list[dict]:
             pages = load_pdf(pdf_file)
             all_pages.extend(pages)
         except RuntimeError as e:
-            print(f"[WARN] Skipping unreadable PDF: {e}")
+            logger.warning(f"Skipping unreadable PDF: {e}")
 
-    print(f"[INFO] Total pages loaded: {len(all_pages)}")
+    logger.info(f"Total pages loaded: {len(all_pages)}")
 
     return all_pages
 

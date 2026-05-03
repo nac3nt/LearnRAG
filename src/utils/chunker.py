@@ -1,5 +1,8 @@
 import re
 import config
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def chunk_pages(pages: list[dict]) -> list[dict]:
@@ -60,12 +63,12 @@ def chunk_pages(pages: list[dict]) -> list[dict]:
             })
 
         if config.DEBUG:
-            print(f"[DEBUG] {page['filename']} p{page['page_number']} → {len(chunks)} chunk(s)")
+            logger.debug(f"{page['filename']} p{page['page_number']} → {len(chunks)} chunk(s)")
 
     if all_chunks and config.DEBUG:
         avg_len = sum(c["metadata"]["char_count"] for c in all_chunks) / len(all_chunks)
-        print(f"[DEBUG] Total chunks created : {len(all_chunks)}")
-        print(f"[DEBUG] Average chunk length : {avg_len:.0f} characters")
+        logger.debug(f"Total chunks created : {len(all_chunks)}")
+        logger.debug(f"Average chunk length : {avg_len:.0f} characters")
 
     return all_chunks
 

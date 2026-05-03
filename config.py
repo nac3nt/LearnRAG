@@ -32,6 +32,10 @@ CHROMA_UPSERT_BATCH_SIZE = int(os.getenv("CHROMA_UPSERT_BATCH_SIZE", "100"))
 # Debug
 DEBUG             = os.getenv("DEBUG", "true").lower() == "true"
 
+# Logging
+LOG_TO_FILE = os.getenv("LOG_TO_FILE", "false").lower() == "true"
+LOG_FILE    = os.getenv("LOG_FILE", "logs/app.log")
+
 # Validation
 if CHUNK_SIZE <= 0:
     raise ValueError("CHUNK_SIZE must be greater than 0")

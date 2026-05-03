@@ -7,3 +7,4 @@ data/chroma/
 *.egg-info/
 .pytest_cache/
 "@ | Out-File -FilePath .gitignore -Encoding utf8
+logs/
