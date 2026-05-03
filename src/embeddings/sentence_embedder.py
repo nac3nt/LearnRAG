@@ -72,7 +72,7 @@ class SentenceEmbedder(BaseEmbedder):
             convert_to_numpy=True,
             normalize_embeddings=True
         )
-        return embedding.tolist()
+        return embedding.tolist() # type: ignore
 
     def embed_batch(self, texts: list[str]) -> Vectors:
         """
@@ -104,7 +104,7 @@ class SentenceEmbedder(BaseEmbedder):
             normalize_embeddings=True,
             show_progress_bar=config.DEBUG
         )
-        return embeddings.tolist()
+        return embeddings.tolist() # type: ignore
 
     def dimension(self) -> int:
         """

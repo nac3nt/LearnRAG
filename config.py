@@ -27,6 +27,7 @@ TOP_K             = int(os.getenv("TOP_K", "3"))  # number of chunks returned
 
 # ChromaDB
 CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "rag_docs")
+CHROMA_UPSERT_BATCH_SIZE = int(os.getenv("CHROMA_UPSERT_BATCH_SIZE", "100"))
 
 # Debug
 DEBUG             = os.getenv("DEBUG", "true").lower() == "true"
