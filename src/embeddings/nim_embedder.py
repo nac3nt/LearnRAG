@@ -1,7 +1,9 @@
+import time
 import requests
 from src.embeddings.base import BaseEmbedder, Vector, Vectors
-import config
 from src.utils.logger import get_logger
+from src.utils.vectors import normalize_vectors
+import config
 
 logger = get_logger(__name__)
 
@@ -52,13 +54,13 @@ class NIMEmbedder(BaseEmbedder):
         return f"nim/{self._model}"
 
     def embed(self, text: str) -> Vector:
-        """Embed a single string via the NIM API."""
+        """Embed a single query string via the NIM API."""
         self._validate_text(text, index=None)
-        return self._call_api([text])[0]
+        return self._call_api([text], input_type="query")[0]
 
     def embed_batch(self, texts: list[str]) -> Vectors:
         """
-        Embed a list of strings via NIM API using batched requests.
+        Embed a list of passage strings via the NIM API.
 
         Splits into sub-batches of EMBED_BATCH_SIZE to stay within
         request limits while preserving input order.
@@ -83,7 +85,7 @@ class NIMEmbedder(BaseEmbedder):
                     f"  Sending sub-batch {i // self._batch_size + 1}: "
                     f"{len(sub_batch)} chunk(s)"
                 )
-            all_vectors.extend(self._call_api(sub_batch))
+            all_vectors.extend(self._call_api(sub_batch, input_type="passage"))
 
         return all_vectors
 
@@ -107,7 +109,7 @@ class NIMEmbedder(BaseEmbedder):
                 f"- probing API..."
             )
 
-        probe = self._call_api(["probe"])
+        probe = self._call_api(["probe"], input_type="query")
         self._probed_dim = len(probe[0])
 
         if config.DEBUG:
@@ -115,12 +117,14 @@ class NIMEmbedder(BaseEmbedder):
 
         return self._probed_dim
 
-    def _call_api(self, texts: list[str]) -> Vectors:
+    def _call_api(self, texts: list[str], input_type: str) -> Vectors:
         """
-        POST to the NIM /v1/embeddings endpoint and return vectors.
+        POST to the NIM /v1/embeddings endpoint and return normalized vectors.
+
+        Retries retryable failures with exponential backoff.
 
         Raises:
-            RuntimeError: on HTTP error or unexpected response shape.
+            RuntimeError: on repeated HTTP failures or unexpected response shape.
         """
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -129,39 +133,70 @@ class NIMEmbedder(BaseEmbedder):
         payload = {
             "model": self._model,
             "input": texts,
+            "input_type": input_type,
         }
 
-        try:
-            response = requests.post(
-                self._endpoint,
-                headers=headers,
-                json=payload,
-                timeout=60,
-            )
-            response.raise_for_status()
-        except requests.exceptions.Timeout as exc:
-            raise RuntimeError(
-                "NIM API request timed out after 60s. "
-                "Check NIM_BASE_URL or try again."
-            ) from exc
-        except requests.exceptions.HTTPError as exc:
-            raise RuntimeError(
-                f"NIM API HTTP error {response.status_code}: " # type: ignore
-                f"{response.text[:300]}" # type: ignore
-            ) from exc
-        except requests.exceptions.RequestException as exc:
-            raise RuntimeError(f"NIM API connection error: {exc}") from exc
+        backoff_seconds = config.NIM_INITIAL_BACKOFF_SECONDS
+        max_attempts = config.NIM_MAX_RETRIES + 1
 
-        try:
-            data = response.json()
-            items = data["data"]
-            items.sort(key=lambda item: item["index"])
-            return [item["embedding"] for item in items]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise RuntimeError(
-                f"Unexpected NIM API response shape: {exc}\n"
-                f"Response: {response.text[:300]}"
-            ) from exc
+        for attempt in range(1, max_attempts + 1):
+            response: requests.Response | None = None
+
+            try:
+                response = requests.post(
+                    self._endpoint,
+                    headers=headers,
+                    json=payload,
+                    timeout=config.NIM_REQUEST_TIMEOUT_SEC,
+                )
+                response.raise_for_status()
+
+                data = response.json()
+                items = data["data"]
+                items.sort(key=lambda item: item["index"])
+                vectors = [item["embedding"] for item in items]
+                return normalize_vectors(vectors)
+            except requests.exceptions.Timeout as exc:
+                error_message = (
+                    f"NIM API request timed out after "
+                    f"{config.NIM_REQUEST_TIMEOUT_SEC:g}s. "
+                    "Check NIM_BASE_URL or try again."
+                )
+                should_retry = True
+                cause = exc
+            except requests.exceptions.HTTPError as exc:
+                status_code = exc.response.status_code if exc.response else "unknown"
+                response_text = exc.response.text[:300] if exc.response else str(exc)
+                error_message = (
+                    f"NIM API HTTP error {status_code}: {response_text}"
+                )
+                should_retry = bool(
+                    exc.response
+                    and exc.response.status_code in config.NIM_RETRYABLE_STATUS_CODES
+                )
+                cause = exc
+            except requests.exceptions.RequestException as exc:
+                error_message = f"NIM API connection error: {exc}"
+                should_retry = True
+                cause = exc
+            except (KeyError, TypeError, ValueError) as exc:
+                response_text = response.text[:300] if response is not None else ""
+                raise RuntimeError(
+                    f"Unexpected NIM API response shape: {exc}\n"
+                    f"Response: {response_text}"
+                ) from exc
+
+            if attempt == max_attempts or not should_retry:
+                raise RuntimeError(error_message) from cause
+
+            logger.warning(
+                f"NIM API call failed on attempt {attempt}/{max_attempts}: "
+                f"{error_message} Retrying in {backoff_seconds:.1f}s."
+            )
+            time.sleep(backoff_seconds)
+            backoff_seconds *= 2
+
+        raise RuntimeError("NIM API request failed unexpectedly.")
 
     @staticmethod
     def _validate_text(text: str, index: int | None) -> None:

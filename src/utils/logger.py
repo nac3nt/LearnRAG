@@ -4,12 +4,12 @@ from pathlib import Path
 import config
 
 
-_LEVEL = logging.DEBUG if config.DEBUG else logging.INFO
+_LEVEL = getattr(logging, config.LOG_LEVEL)
 
 
 _FORMATTER = logging.Formatter(
-    fmt="[%(asctime)s] %(levelname)-8s %(name)s - %(message)s",
-    datefmt="%H:%M:%S"
+    fmt=config.LOG_FORMAT,
+    datefmt=config.LOG_DATE_FORMAT
 )
 
 
@@ -52,7 +52,7 @@ def get_logger(name: str) -> logging.Logger:
         log_path = Path(config.LOG_FILE) # type: ignore
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler = logging.FileHandler(log_path, encoding=config.LOG_FILE_ENCODING)
         file_handler.setLevel(_LEVEL)
         file_handler.setFormatter(_FORMATTER)
         logger.addHandler(file_handler)
