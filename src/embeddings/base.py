@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-Vector  = list[float]         # single embedding vector
-Vectors = list[list[float]]   # batch of embedding vectors
+Vector = list[float]
+Vectors = list[list[float]]
 
 
 class BaseEmbedder(ABC):
@@ -13,8 +13,7 @@ class BaseEmbedder(ABC):
     network calls, and error handling.
 
     Current implementations:
-        - SentenceEmbedder  (sentence_embedder.py)  → sentence-transformers, local
-        - OllamaEmbedder    (ollama_embedder.py)    → Ollama REST API
+        - NIMEmbedder (nim_embedder.py) -> NVIDIA NIM embeddings API
     """
 
     @abstractmethod
@@ -25,9 +24,8 @@ class BaseEmbedder(ABC):
         Used in logs and debug output to identify which
         provider and model is active.
 
-        Example return values:
-            "sentence-transformers/all-MiniLM-L6-v2"
-            "ollama/nomic-embed-text"
+        Example return value:
+            "nim/nvidia/nv-embedqa-e5-v5"
         """
         pass
 
@@ -70,19 +68,11 @@ class BaseEmbedder(ABC):
         """
         Return the dimensionality of vectors produced by this embedder.
 
-        Must return a static, known value — not discovered lazily
-        after the first call. This value is used by ChromaDB when
-        creating a collection and must be consistent across all
-        embed() and embed_batch() calls.
+        Must return a static, known value, or probe once and cache
+        the result before returning a stable value to the caller.
 
         Returns:
             An integer representing vector length.
-            Example: 384 for all-MiniLM-L6-v2
-                     768 for nomic-embed-text
-
-        Note:
-            If dimension is unknown before the first call, raise
-            NotImplementedError with a clear message rather than
-            returning a wrong value silently.
+            Example: 1024 for nv-embedqa-e5-v5
         """
         pass

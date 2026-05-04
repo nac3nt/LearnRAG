@@ -10,15 +10,15 @@ logger = get_logger(__name__)
 
 def run_ingestion(reset: bool = False) -> dict:
     """
-    Full ingestion pipeline — runs once to prepare the knowledge base.
+    Full ingestion pipeline that prepares the knowledge base once.
 
     Steps:
         1. Load all PDFs from data/docs/
         2. Chunk pages into overlapping segments
-        3. Embed chunks using configured embedder
+        3. Embed chunks using NVIDIA NIM
         4. Upsert vectors and metadata into ChromaDB
 
-    Re-running is safe — duplicate IDs are overwritten, not duplicated.
+    Re-running is safe because duplicate IDs are overwritten.
 
     Args:
         reset: If True, wipes the ChromaDB collection before ingestion.
@@ -41,16 +41,15 @@ def run_ingestion(reset: bool = False) -> dict:
     logger.info(f"Chroma path     : {config.CHROMA_PATH}")
     logger.info(f"Chunk size      : {config.CHUNK_SIZE} characters")
     logger.info(f"Chunk overlap   : {config.CHUNK_OVERLAP} characters")
-    logger.info(f"Embed mode      : {config.EMBED_MODE}")
+    logger.info("Embed provider  : NVIDIA NIM")
+    logger.info(f"Embed model     : {config.NIM_EMBED_MODEL}")
     logger.info("=" * 52)
 
-    # Optional reset
     if reset:
-        logger.warning("Reset mode enabled — wiping existing collection.")
+        logger.warning("Reset mode enabled - wiping existing collection.")
         store = ChromaStore()
         store.reset()
 
-    # Step 1: Load
     logger.info("Step 1/4 - Loading PDFs...")
     step_start = time.perf_counter()
 
@@ -62,7 +61,6 @@ def run_ingestion(reset: bool = False) -> dict:
         logger.error("No pages loaded. Add PDF files to data/docs/ and retry.")
         return _summary(0, 0, 0, pipeline_start)
 
-    # Step 2: Chunk
     logger.info("Step 2/4 - Chunking pages...")
     step_start = time.perf_counter()
 
@@ -74,19 +72,17 @@ def run_ingestion(reset: bool = False) -> dict:
         logger.error("No chunks produced. Check chunk size settings in .env.")
         return _summary(len(pages), 0, 0, pipeline_start)
 
-    # Step 3: Embed
     logger.info("Step 3/4 - Embedding chunks...")
     step_start = time.perf_counter()
 
     embedder = _load_embedder()
     logger.info(f"Embedder : {embedder.name()} | dim: {embedder.dimension()}")
 
-    texts   = [c["text"] for c in chunks]
+    texts = [c["text"] for c in chunks]
     vectors = embedder.embed_batch(texts)
 
     logger.info(f"Embeddings produced : {len(vectors)} ({_elapsed(step_start)})")
 
-    # Step 4: Store 
     logger.info("Step 4/4 - Storing in ChromaDB...")
     step_start = time.perf_counter()
 
@@ -113,32 +109,9 @@ def run_ingestion(reset: bool = False) -> dict:
 
 
 def _load_embedder():
-    """
-    Load the configured embedder based on config.EMBED_MODE.
-
-    Returns:
-        SentenceEmbedder if EMBED_MODE = "sentence_transformers"
-        OllamaEmbedder   if EMBED_MODE = "ollama"
-
-    Raises:
-        ValueError: if EMBED_MODE is not a recognized value.
-    """
-    if config.EMBED_MODE == "sentence_transformers":
-        from src.embeddings.sentence_embedder import SentenceEmbedder
-        return SentenceEmbedder()
-
-    if config.EMBED_MODE == "ollama":
-        from src.embeddings.ollama_embedder import OllamaEmbedder # type: ignore
-        return OllamaEmbedder()
-
-    if config.EMBED_MODE == "nim":
-        from src.embeddings.nim_embedder import NIMEmbedder
-        return NIMEmbedder()
-
-    raise ValueError(
-        f"Unknown EMBED_MODE: '{config.EMBED_MODE}'. "
-        f"Expected 'sentence_transformers', 'ollama', or 'nim'."
-    )
+    """Load the NVIDIA NIM embedder used by the ingestion pipeline."""
+    from src.embeddings.nim_embedder import NIMEmbedder
+    return NIMEmbedder()
 
 
 def _elapsed(start: float) -> str:
