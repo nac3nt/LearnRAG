@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 .env
 data/chroma/
+data/docs/
 *.egg-info/
 .pytest_cache/
 "@ | Out-File -FilePath .gitignore -Encoding utf8
