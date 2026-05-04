@@ -2,7 +2,7 @@ import chromadb
 from chromadb.config import Settings
 from src.embeddings.base import Vector
 from src.utils.logger import get_logger
-from src.utils.vectors import normalize_vector, normalize_vectors
+from src.utils.vectors import normalize_vector
 from src.vectordb.base import BaseVectorDB
 import config
 
@@ -66,8 +66,9 @@ class ChromaStore(BaseVectorDB):
             return
 
         _validate_vector_dimensions(vectors)
-        normalized_vectors = normalize_vectors(vectors)
 
+        # Vectors are expected to be pre-normalized by the embedder.
+        # ChromaStore does not normalize — that is the embedder contract.
         batch_size = config.CHROMA_UPSERT_BATCH_SIZE
         total = len(chunks)
         num_batches = (total + batch_size - 1) // batch_size
@@ -77,7 +78,7 @@ class ChromaStore(BaseVectorDB):
             end = min(start + batch_size, total)
 
             batch_chunks = chunks[start:end]
-            batch_vectors = normalized_vectors[start:end]
+            batch_vectors = vectors[start:end]
 
             ids = [c["id"] for c in batch_chunks]
             documents = [c["text"] for c in batch_chunks]
