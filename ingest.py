@@ -14,7 +14,7 @@ def run_ingestion(reset: bool = False) -> dict:
 
     Steps:
         1. Load all PDFs from data/docs/
-        2. Chunk pages into overlapping segments
+        2. Convert pages, tables, and image descriptions into chunks
         3. Embed chunks using NVIDIA NIM
         4. Upsert vectors and metadata into ChromaDB
 
@@ -27,11 +27,12 @@ def run_ingestion(reset: bool = False) -> dict:
     Returns:
         Summary dict:
         {
-            "pages_loaded"   : int,
-            "chunks_created" : int,
-            "vectors_stored" : int,
-            "duration_sec"   : float,
-            "timings_sec"    : {
+            "pages_loaded"         : int,
+            "content_blocks_loaded": int,
+            "chunks_created"       : int,
+            "vectors_stored"       : int,
+            "duration_sec"         : float,
+            "timings_sec"          : {
                 "load"  : float,
                 "chunk" : float,
                 "embed" : float,
@@ -52,8 +53,24 @@ def run_ingestion(reset: bool = False) -> dict:
     logger.info("Starting ingestion pipeline")
     logger.info(f"Docs path       : {config.DOCS_PATH}")
     logger.info(f"Chroma path     : {config.CHROMA_PATH}")
-    logger.info(f"Chunk size      : {config.CHUNK_SIZE} characters")
-    logger.info(f"Chunk overlap   : {config.CHUNK_OVERLAP} characters")
+    logger.info(f"Chunk strategy  : {config.CHUNK_STRATEGY}")
+    if config.CHUNK_STRATEGY == "semantic":
+        logger.info(
+            "Chunk budget    : "
+            f"min={config.CHUNK_MIN_TOKENS} | "
+            f"max={config.CHUNK_MAX_TOKENS} approx. tokens"
+        )
+        logger.info(
+            "Semantic split  : "
+            f"similarity<{config.CHUNK_SIMILARITY_THRESHOLD}"
+        )
+        logger.info(
+            "Fallback split  : "
+            f"{config.CHUNK_SIZE} chars | overlap {config.CHUNK_OVERLAP} chars"
+        )
+    else:
+        logger.info(f"Chunk size      : {config.CHUNK_SIZE} characters")
+        logger.info(f"Chunk overlap   : {config.CHUNK_OVERLAP} characters")
     logger.info("Embed provider  : NVIDIA NIM")
     logger.info(f"Embed model     : {config.NIM_EMBED_MODEL}")
     logger.info("=" * 52)
@@ -65,23 +82,28 @@ def run_ingestion(reset: bool = False) -> dict:
 
     logger.info("Step 1/4 - Loading PDFs...")
     step_start = time.perf_counter()
-    pages = load_all_pdfs(config.DOCS_PATH)
+    content_blocks = load_all_pdfs(config.DOCS_PATH)
     timings["load"] = _elapsed_seconds(step_start)
-    logger.info(f"Pages loaded : {len(pages)} ({timings['load']:.2f}s)")
+    page_count = _count_unique_pages(content_blocks)
+    logger.info(
+        f"Pages loaded : {page_count} | "
+        f"content blocks: {len(content_blocks)} "
+        f"({timings['load']:.2f}s)"
+    )
 
-    if not pages:
+    if not content_blocks:
         logger.error("No pages loaded. Add PDF files to data/docs/ and retry.")
-        return _summary(0, 0, 0, pipeline_start, timings)
+        return _summary(0, 0, 0, 0, pipeline_start, timings)
 
     logger.info("Step 2/4 - Chunking pages...")
     step_start = time.perf_counter()
-    chunks = chunk_pages(pages)
+    chunks = chunk_pages(content_blocks)
     timings["chunk"] = _elapsed_seconds(step_start)
     logger.info(f"Chunks created : {len(chunks)} ({timings['chunk']:.2f}s)")
 
     if not chunks:
         logger.error("No chunks produced. Check chunk size settings in .env.")
-        return _summary(len(pages), 0, 0, pipeline_start, timings)
+        return _summary(page_count, len(content_blocks), 0, 0, pipeline_start, timings)
 
     logger.info("Step 3/4 - Embedding chunks...")
     step_start = time.perf_counter()
@@ -104,13 +126,21 @@ def run_ingestion(reset: bool = False) -> dict:
     logger.info(f"Chunks before : {before}")
     logger.info(f"Chunks after  : {after} ({timings['store']:.2f}s)")
 
-    summary = _summary(len(pages), len(chunks), after, pipeline_start, timings)
+    summary = _summary(
+        page_count,
+        len(content_blocks),
+        len(chunks),
+        after,
+        pipeline_start,
+        timings,
+    )
 
     logger.info("=" * 52)
     logger.info("Ingestion complete.")
-    logger.info(f"Pages loaded    : {summary['pages_loaded']}")
-    logger.info(f"Chunks created  : {summary['chunks_created']}")
-    logger.info(f"Vectors stored  : {summary['vectors_stored']}")
+    logger.info(f"Pages loaded         : {summary['pages_loaded']}")
+    logger.info(f"Content blocks loaded: {summary['content_blocks_loaded']}")
+    logger.info(f"Chunks created       : {summary['chunks_created']}")
+    logger.info(f"Vectors stored       : {summary['vectors_stored']}")
     logger.info(
         "Timing metrics  : "
         f"load={summary['timings_sec']['load']:.2f}s | "
@@ -138,6 +168,7 @@ def _elapsed_seconds(start: float) -> float:
 
 def _summary(
     pages: int,
+    content_blocks: int,
     chunks: int,
     stored: int,
     start: float,
@@ -148,6 +179,7 @@ def _summary(
 
     return {
         "pages_loaded": pages,
+        "content_blocks_loaded": content_blocks,
         "chunks_created": chunks,
         "vectors_stored": stored,
         "duration_sec": total,
@@ -159,6 +191,16 @@ def _summary(
             "total": total,
         }
     }
+
+
+def _count_unique_pages(content_blocks: list[dict]) -> int:
+    """Count distinct source pages represented in the loaded content blocks."""
+    return len(
+        {
+            (block["filename"], block["page_number"])
+            for block in content_blocks
+        }
+    )
 
 
 if __name__ == "__main__":
