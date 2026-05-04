@@ -131,9 +131,13 @@ def _load_embedder():
         from src.embeddings.ollama_embedder import OllamaEmbedder # type: ignore
         return OllamaEmbedder()
 
+    if config.EMBED_MODE == "nim":
+        from src.embeddings.nim_embedder import NIMEmbedder
+        return NIMEmbedder()
+
     raise ValueError(
         f"Unknown EMBED_MODE: '{config.EMBED_MODE}'. "
-        f"Expected 'sentence_transformers' or 'ollama'."
+        f"Expected 'sentence_transformers', 'ollama', or 'nim'."
     )
 
 

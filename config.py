@@ -22,6 +22,11 @@ EMBED_DEVICE       = os.getenv("EMBED_DEVICE", "auto") # options: "auto" | "cuda
 OLLAMA_BASE_URL   = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 LLM_MODEL         = os.getenv("LLM_MODEL",       "llama3.2:3b")
 
+# NVIDIA NIM
+NIM_API_KEY       = os.getenv("NVIDIA_API_KEY", "")
+NIM_BASE_URL      = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com")
+NIM_EMBED_MODEL   = os.getenv("NIM_EMBED_MODEL", "nvidia/nv-embedqa-e5-v5")
+
 # Retrieval
 TOP_K             = int(os.getenv("TOP_K", "3"))  # number of chunks returned
 
