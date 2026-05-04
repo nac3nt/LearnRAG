@@ -1,9 +1,12 @@
 import time
+
+import config
+from src.embeddings.image_factory import load_image_embedder
 from src.loaders.pdf_loader import load_all_pdfs
 from src.utils.chunker import chunk_pages
+from src.utils.image_records import build_image_vector_items
 from src.utils.logger import get_logger
 from src.vectordb.chroma_store import ChromaStore
-import config
 
 logger = get_logger(__name__)
 
@@ -14,30 +17,34 @@ def run_ingestion(reset: bool = False) -> dict:
 
     Steps:
         1. Load all PDFs from data/docs/
-        2. Convert pages, tables, and image descriptions into chunks
-        3. Embed chunks using NVIDIA NIM
-        4. Upsert vectors and metadata into ChromaDB
+        2. Convert text-like content into chunks
+        3. Embed text chunks
+        4. Embed extracted images
+        5. Upsert text and image vectors into ChromaDB
 
     Re-running is safe because duplicate IDs are overwritten.
 
     Args:
-        reset: If True, wipes the ChromaDB collection before ingestion.
+        reset: If True, wipes the ChromaDB collections before ingestion.
                Use during development when re-ingesting from scratch.
 
     Returns:
         Summary dict:
         {
-            "pages_loaded"         : int,
-            "content_blocks_loaded": int,
-            "chunks_created"       : int,
-            "vectors_stored"       : int,
-            "duration_sec"         : float,
-            "timings_sec"          : {
-                "load"  : float,
-                "chunk" : float,
-                "embed" : float,
-                "store" : float,
-                "total" : float
+            "pages_loaded"          : int,
+            "content_blocks_loaded" : int,
+            "image_blocks_loaded"   : int,
+            "chunks_created"        : int,
+            "vectors_stored"        : int,
+            "image_vectors_stored"  : int,
+            "duration_sec"          : float,
+            "timings_sec"           : {
+                "load"        : float,
+                "chunk"       : float,
+                "text_embed"  : float,
+                "image_embed" : float,
+                "store"       : float,
+                "total"       : float
             }
         }
     """
@@ -45,7 +52,8 @@ def run_ingestion(reset: bool = False) -> dict:
     timings = {
         "load": 0.0,
         "chunk": 0.0,
-        "embed": 0.0,
+        "text_embed": 0.0,
+        "image_embed": 0.0,
         "store": 0.0,
     }
 
@@ -53,6 +61,8 @@ def run_ingestion(reset: bool = False) -> dict:
     logger.info("Starting ingestion pipeline")
     logger.info(f"Docs path       : {config.DOCS_PATH}")
     logger.info(f"Chroma path     : {config.CHROMA_PATH}")
+    logger.info(f"Text collection : {config.CHROMA_COLLECTION}")
+    logger.info(f"Image collection: {config.CHROMA_IMAGE_COLLECTION}")
     logger.info(f"Chunk strategy  : {config.CHUNK_STRATEGY}")
     if config.CHUNK_STRATEGY == "semantic":
         logger.info(
@@ -71,81 +81,135 @@ def run_ingestion(reset: bool = False) -> dict:
     else:
         logger.info(f"Chunk size      : {config.CHUNK_SIZE} characters")
         logger.info(f"Chunk overlap   : {config.CHUNK_OVERLAP} characters")
-    logger.info("Embed provider  : NVIDIA NIM")
-    logger.info(f"Embed model     : {config.NIM_EMBED_MODEL}")
+    logger.info("Text embedder   : NVIDIA NIM")
+    logger.info(f"Text model      : {config.NIM_EMBED_MODEL}")
+    logger.info(f"Image embedder  : {config.IMAGE_EMBED_PROVIDER}")
     logger.info("=" * 52)
 
-    if reset:
-        logger.warning("Reset mode enabled - wiping existing collection.")
-        store = ChromaStore()
-        store.reset()
+    text_store = ChromaStore()
+    image_store = ChromaStore(collection_name=config.CHROMA_IMAGE_COLLECTION)
 
-    logger.info("Step 1/4 - Loading PDFs...")
+    if reset:
+        logger.warning("Reset mode enabled - wiping existing collections.")
+        text_store.reset()
+        image_store.reset()
+
+    logger.info("Step 1/5 - Loading PDFs...")
     step_start = time.perf_counter()
     content_blocks = load_all_pdfs(config.DOCS_PATH)
     timings["load"] = _elapsed_seconds(step_start)
     page_count = _count_unique_pages(content_blocks)
+    image_block_count = sum(
+        1 for block in content_blocks if block.get("content_type") == "image"
+    )
     logger.info(
         f"Pages loaded : {page_count} | "
-        f"content blocks: {len(content_blocks)} "
+        f"content blocks: {len(content_blocks)} | "
+        f"image blocks: {image_block_count} "
         f"({timings['load']:.2f}s)"
     )
 
     if not content_blocks:
         logger.error("No pages loaded. Add PDF files to data/docs/ and retry.")
-        return _summary(0, 0, 0, 0, pipeline_start, timings)
+        return _summary(0, 0, 0, 0, 0, pipeline_start, timings)
 
-    logger.info("Step 2/4 - Chunking pages...")
+    logger.info("Step 2/5 - Chunking text content...")
     step_start = time.perf_counter()
     chunks = chunk_pages(content_blocks)
     timings["chunk"] = _elapsed_seconds(step_start)
-    logger.info(f"Chunks created : {len(chunks)} ({timings['chunk']:.2f}s)")
+    logger.info(f"Text chunks created : {len(chunks)} ({timings['chunk']:.2f}s)")
 
-    if not chunks:
-        logger.error("No chunks produced. Check chunk size settings in .env.")
-        return _summary(page_count, len(content_blocks), 0, 0, pipeline_start, timings)
+    logger.info("Step 3/5 - Embedding text chunks...")
+    text_vectors = []
+    if chunks:
+        step_start = time.perf_counter()
+        text_embedder = _load_embedder()
+        logger.info(
+            f"Text embedder : {text_embedder.name()} | dim: {text_embedder.dimension()}"
+        )
 
-    logger.info("Step 3/4 - Embedding chunks...")
+        texts = [chunk["text"] for chunk in chunks]
+        text_vectors = text_embedder.embed_batch(texts)
+        timings["text_embed"] = _elapsed_seconds(step_start)
+        logger.info(
+            "Text embeddings produced : "
+            f"{len(text_vectors)} ({timings['text_embed']:.2f}s)"
+        )
+    else:
+        logger.warning("No text chunks produced. Text retrieval will be empty.")
+
+    logger.info("Step 4/5 - Embedding extracted images...")
     step_start = time.perf_counter()
-    embedder = _load_embedder()
-    logger.info(f"Embedder : {embedder.name()} | dim: {embedder.dimension()}")
+    image_items = build_image_vector_items(content_blocks)
+    image_vectors = []
+    image_embedder = load_image_embedder()
 
-    texts = [chunk["text"] for chunk in chunks]
-    vectors = embedder.embed_batch(texts)
-    timings["embed"] = _elapsed_seconds(step_start)
-    logger.info(f"Embeddings produced : {len(vectors)} ({timings['embed']:.2f}s)")
+    if image_items and image_embedder is not None:
+        logger.info(
+            f"Image embedder: {image_embedder.name()} | dim: {image_embedder.dimension()}"
+        )
+        image_vectors = image_embedder.embed_image_batch(
+            [item["input"] for item in image_items]
+        )
+        logger.info(f"Image embeddings produced : {len(image_vectors)}")
+    elif image_items:
+        logger.warning(
+            "Image blocks were extracted but no image embedder is configured. "
+            "Set IMAGE_EMBED_PROVIDER=custom and IMAGE_EMBEDDER_CLASS=... to "
+            "ingest first-class image vectors."
+        )
+    else:
+        logger.info("No image blocks available for image-vector ingestion.")
 
-    logger.info("Step 4/4 - Storing in ChromaDB...")
+    timings["image_embed"] = _elapsed_seconds(step_start)
+    logger.info(f"Image embedding step : {timings['image_embed']:.2f}s")
+
+    logger.info("Step 5/5 - Storing vectors in ChromaDB...")
     step_start = time.perf_counter()
-    store = ChromaStore()
-    before = store.count()
-    store.upsert(chunks, vectors)
-    after = store.count()
+
+    text_before = text_store.count()
+    if chunks and text_vectors:
+        text_store.upsert(chunks, text_vectors)
+    text_after = text_store.count()
+
+    image_before = image_store.count()
+    image_records = [item["record"] for item in image_items]
+    if image_records and image_vectors:
+        image_store.upsert(image_records, image_vectors)
+    image_after = image_store.count()
+
     timings["store"] = _elapsed_seconds(step_start)
 
-    logger.info(f"Chunks before : {before}")
-    logger.info(f"Chunks after  : {after} ({timings['store']:.2f}s)")
+    logger.info(f"Text vectors before : {text_before}")
+    logger.info(f"Text vectors after  : {text_after}")
+    logger.info(f"Image vectors before: {image_before}")
+    logger.info(f"Image vectors after : {image_after} ({timings['store']:.2f}s)")
 
     summary = _summary(
-        page_count,
-        len(content_blocks),
-        len(chunks),
-        after,
-        pipeline_start,
-        timings,
+        pages=page_count,
+        content_blocks=len(content_blocks),
+        image_blocks=image_block_count,
+        chunks=len(chunks),
+        stored=text_after,
+        image_stored=image_after,
+        start=pipeline_start,
+        timings=timings,
     )
 
     logger.info("=" * 52)
     logger.info("Ingestion complete.")
     logger.info(f"Pages loaded         : {summary['pages_loaded']}")
     logger.info(f"Content blocks loaded: {summary['content_blocks_loaded']}")
-    logger.info(f"Chunks created       : {summary['chunks_created']}")
-    logger.info(f"Vectors stored       : {summary['vectors_stored']}")
+    logger.info(f"Image blocks loaded  : {summary['image_blocks_loaded']}")
+    logger.info(f"Text chunks created  : {summary['chunks_created']}")
+    logger.info(f"Text vectors stored  : {summary['vectors_stored']}")
+    logger.info(f"Image vectors stored : {summary['image_vectors_stored']}")
     logger.info(
         "Timing metrics  : "
         f"load={summary['timings_sec']['load']:.2f}s | "
         f"chunk={summary['timings_sec']['chunk']:.2f}s | "
-        f"embed={summary['timings_sec']['embed']:.2f}s | "
+        f"text_embed={summary['timings_sec']['text_embed']:.2f}s | "
+        f"image_embed={summary['timings_sec']['image_embed']:.2f}s | "
         f"store={summary['timings_sec']['store']:.2f}s | "
         f"total={summary['timings_sec']['total']:.2f}s"
     )
@@ -158,6 +222,7 @@ def run_ingestion(reset: bool = False) -> dict:
 def _load_embedder():
     """Load the NVIDIA NIM embedder used by the ingestion pipeline."""
     from src.embeddings.nim_embedder import NIMEmbedder
+
     return NIMEmbedder()
 
 
@@ -169,10 +234,12 @@ def _elapsed_seconds(start: float) -> float:
 def _summary(
     pages: int,
     content_blocks: int,
+    image_blocks: int,
     chunks: int,
     stored: int,
+    image_stored: int,
     start: float,
-    timings: dict[str, float]
+    timings: dict[str, float],
 ) -> dict:
     """Build and return the ingestion summary dict."""
     total = _elapsed_seconds(start)
@@ -180,16 +247,19 @@ def _summary(
     return {
         "pages_loaded": pages,
         "content_blocks_loaded": content_blocks,
+        "image_blocks_loaded": image_blocks,
         "chunks_created": chunks,
         "vectors_stored": stored,
+        "image_vectors_stored": image_stored,
         "duration_sec": total,
         "timings_sec": {
             "load": timings["load"],
             "chunk": timings["chunk"],
-            "embed": timings["embed"],
+            "text_embed": timings["text_embed"],
+            "image_embed": timings["image_embed"],
             "store": timings["store"],
             "total": total,
-        }
+        },
     }
 
 
@@ -210,7 +280,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="Wipe ChromaDB collection before ingesting."
+        help="Wipe ChromaDB collections before ingesting.",
     )
     args = parser.parse_args()
 

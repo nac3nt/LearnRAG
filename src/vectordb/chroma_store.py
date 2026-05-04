@@ -25,27 +25,28 @@ class ChromaStore(BaseVectorDB):
         Higher score = more similar to the query.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, collection_name: str | None = None) -> None:
         if config.DEBUG:
             logger.debug(f"Initializing ChromaDB at: {config.CHROMA_PATH}")
 
+        self._collection_name = collection_name or config.CHROMA_COLLECTION
         self._client = chromadb.PersistentClient(
             path=config.CHROMA_PATH,
             settings=Settings(anonymized_telemetry=False)
         )
 
         self._collection = self._client.get_or_create_collection(
-            name=config.CHROMA_COLLECTION,
+            name=self._collection_name,
             metadata={"hnsw:space": config.CHROMA_DISTANCE_SPACE}
         )
 
         if config.DEBUG:
-            logger.debug(f"Collection    : {config.CHROMA_COLLECTION}")
+            logger.debug(f"Collection    : {self._collection_name}")
             logger.debug(f"Chunks stored : {self.count()}")
 
     def name(self) -> str:
         """Return human-readable store identifier."""
-        return f"chromadb/{config.CHROMA_COLLECTION}"
+        return f"chromadb/{self._collection_name}"
 
     def upsert(self, chunks: list[dict], vectors: list[Vector]) -> None:
         """
@@ -167,17 +168,17 @@ class ChromaStore(BaseVectorDB):
     def reset(self) -> None:
         """Delete and recreate the collection, wiping all stored data."""
         logger.warning(
-            f"Resetting collection '{config.CHROMA_COLLECTION}' - all data will be lost."
+            f"Resetting collection '{self._collection_name}' - all data will be lost."
         )
 
         try:
-            self._client.delete_collection(name=config.CHROMA_COLLECTION)
+            self._client.delete_collection(name=self._collection_name)
         except Exception as exc:
             if config.DEBUG:
                 logger.debug(f"Delete collection skipped: {exc}")
 
         self._collection = self._client.get_or_create_collection(
-            name=config.CHROMA_COLLECTION,
+            name=self._collection_name,
             metadata={"hnsw:space": config.CHROMA_DISTANCE_SPACE}
         )
 

@@ -88,11 +88,16 @@ VISION_DESCRIPTION_PROMPT = os.getenv(
     ),
 )
 
+# Image embeddings / multimodal retrieval
+IMAGE_EMBED_PROVIDER = os.getenv("IMAGE_EMBED_PROVIDER", "none").lower()
+IMAGE_EMBEDDER_CLASS = os.getenv("IMAGE_EMBEDDER_CLASS", "")
+
 # Retrieval
 TOP_K = int(os.getenv("TOP_K", "3"))  # number of chunks returned
 
 # ChromaDB
 CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "rag_docs")
+CHROMA_IMAGE_COLLECTION = os.getenv("CHROMA_IMAGE_COLLECTION", "rag_images")
 CHROMA_UPSERT_BATCH_SIZE = int(os.getenv("CHROMA_UPSERT_BATCH_SIZE", "100"))
 CHROMA_DISTANCE_SPACE = os.getenv("CHROMA_DISTANCE_SPACE", "cosine")
 
@@ -175,6 +180,22 @@ if VISION_INITIAL_BACKOFF_SECONDS <= 0:
 
 if any(code < 100 or code > 599 for code in VISION_RETRYABLE_STATUS_CODES):
     raise ValueError("VISION_RETRYABLE_STATUS_CODES must contain valid HTTP status codes")
+
+if IMAGE_EMBED_PROVIDER not in {"none", "custom"}:
+    raise ValueError("IMAGE_EMBED_PROVIDER must be one of: none, custom")
+
+if IMAGE_EMBED_PROVIDER == "custom" and not IMAGE_EMBEDDER_CLASS:
+    raise ValueError(
+        "IMAGE_EMBEDDER_CLASS must be set when IMAGE_EMBED_PROVIDER=custom"
+    )
+
+if IMAGE_EMBED_PROVIDER != "none" and not PDF_EXTRACT_IMAGES:
+    raise ValueError(
+        "PDF_EXTRACT_IMAGES must be true when IMAGE_EMBED_PROVIDER is enabled"
+    )
+
+if not CHROMA_IMAGE_COLLECTION.strip():
+    raise ValueError("CHROMA_IMAGE_COLLECTION must not be empty")
 
 if LOG_LEVEL not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}:
     raise ValueError(

@@ -227,8 +227,9 @@ def _extract_page_images(
     """
     Extract embedded images from a PDF page.
 
-    Images only become retrievable chunks when a captioner is configured.
-    They can still be saved to disk for later UI/display use.
+    Image blocks are always returned so they can be embedded as raw image
+    vectors later. A captioner is optional and only affects whether an
+    additional text representation is available for text retrieval.
     """
     if not config.PDF_EXTRACT_IMAGES:
         return []
@@ -257,49 +258,52 @@ def _extract_page_images(
                 extension=extension,
             )
 
-        if captioner is None:
-            if config.DEBUG:
-                logger.debug(
-                    "Skipping image indexing for "
-                    f"{filename} page {page_number} image {image_index + 1}: "
-                    "no captioner configured."
+        description_text = ""
+        caption_source = ""
+
+        if captioner is not None:
+            try:
+                description = captioner.describe(
+                    image_bytes=image_bytes,
+                    mime_type=mime_type,
+                    filename=filename,
+                    page_number=page_number,
+                    image_index=image_index,
                 )
-            continue
-
-        try:
-            description = captioner.describe(
-                image_bytes=image_bytes,
-                mime_type=mime_type,
-                filename=filename,
-                page_number=page_number,
-                image_index=image_index,
+                if description.strip():
+                    description_text = _image_description_to_text(
+                        description=description,
+                        filename=filename,
+                        page_number=page_number,
+                        image_index=image_index,
+                    )
+                    caption_source = captioner.name()
+            except Exception as exc:
+                logger.warning(
+                    "Image captioning failed for "
+                    f"{filename} page {page_number} image {image_index + 1}: {exc}"
+                )
+        elif config.DEBUG:
+            logger.debug(
+                "No captioner configured for "
+                f"{filename} page {page_number} image {image_index + 1}. "
+                "Image will still be available for raw image-vector ingestion."
             )
-        except Exception as exc:
-            logger.warning(
-                "Image captioning failed for "
-                f"{filename} page {page_number} image {image_index + 1}: {exc}"
-            )
-            continue
-
-        if not description.strip():
-            continue
 
         content_block = {
-            "text": _image_description_to_text(
-                description=description,
-                filename=filename,
-                page_number=page_number,
-                image_index=image_index,
-            ),
+            "text": description_text,
             "page_number": page_number,
             "filename": filename,
             "content_type": "image",
             "content_index": image_index,
-            "source": captioner.name(),
+            "source": "pypdf/image",
             "mime_type": mime_type,
+            "image_bytes": image_bytes,
         }
         if asset_path:
             content_block["asset_path"] = asset_path
+        if caption_source:
+            content_block["caption_source"] = caption_source
 
         content_blocks.append(content_block)
 

@@ -84,9 +84,18 @@ def chunk_pages(pages: list[dict]) -> list[dict]:
     all_chunks = []
 
     for page in pages:
+        raw_text = page.get("text", "")
+        if not raw_text or not raw_text.strip():
+            if config.DEBUG:
+                logger.debug(
+                    f"{page['filename']} p{page['page_number']} -> 0 text chunk(s) "
+                    "(empty text representation)"
+                )
+            continue
+
         content_type = page.get("content_type", "page_text")
         chunks = _chunk_content(
-            text=page["text"],
+            text=raw_text,
             content_type=content_type,
         )
 
@@ -99,7 +108,11 @@ def chunk_pages(pages: list[dict]) -> list[dict]:
                 chunk_index=chunk_index,
             )
 
-            metadata = {key: value for key, value in page.items() if key != "text"}
+            metadata = {
+                key: value
+                for key, value in page.items()
+                if key not in {"text", "image_bytes"}
+            }
             metadata["chunk_index"] = chunk_index
             metadata["char_count"] = len(chunk_text)
             metadata["token_count"] = _estimate_token_count(chunk_text)
