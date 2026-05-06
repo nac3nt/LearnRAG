@@ -25,12 +25,50 @@ class MultimodalRetriever:
         image_store: ChromaStore | None = None,
         image_embedder: BaseImageEmbedder | None = None,
     ) -> None:
-        self._text_store = text_store or ChromaStore()
-        self._text_embedder = text_embedder or NIMEmbedder()
-        self._image_store = image_store or ChromaStore(
-            collection_name=config.CHROMA_IMAGE_COLLECTION
-        )
-        self._image_embedder = image_embedder if image_embedder is not None else load_image_embedder()
+        # Store arguments without triggering any network calls or API validation.
+        # NIMEmbedder and ChromaStore are constructed lazily on first use via properties.
+        self._text_store_arg    = text_store
+        self._text_embedder_arg = text_embedder
+        self._image_store_arg   = image_store
+        self._image_embedder_arg = image_embedder
+
+        # Cached resolved instances (populated on first access)
+        self.__text_store:    ChromaStore | None        = None
+        self.__text_embedder: BaseEmbedder | None       = None
+        self.__image_store:   ChromaStore | None        = None
+        self.__image_embedder: BaseImageEmbedder | None = None
+        self.__image_embedder_resolved: bool            = False
+
+    @property
+    def _text_store(self) -> ChromaStore:
+        if self.__text_store is None:
+            self.__text_store = self._text_store_arg or ChromaStore()
+        return self.__text_store
+
+    @property
+    def _text_embedder(self) -> BaseEmbedder:
+        if self.__text_embedder is None:
+            self.__text_embedder = self._text_embedder_arg or NIMEmbedder()
+        return self.__text_embedder
+
+    @property
+    def _image_store(self) -> ChromaStore:
+        if self.__image_store is None:
+            self.__image_store = self._image_store_arg or ChromaStore(
+                collection_name=config.CHROMA_IMAGE_COLLECTION
+            )
+        return self.__image_store
+
+    @property
+    def _image_embedder(self) -> BaseImageEmbedder | None:
+        if not self.__image_embedder_resolved:
+            self.__image_embedder = (
+                self._image_embedder_arg
+                if self._image_embedder_arg is not None
+                else load_image_embedder()
+            )
+            self.__image_embedder_resolved = True
+        return self.__image_embedder
 
     def retrieve(
         self,

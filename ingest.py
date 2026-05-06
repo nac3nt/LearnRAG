@@ -111,7 +111,7 @@ def run_ingestion(reset: bool = False) -> dict:
 
     if not content_blocks:
         logger.error("No pages loaded. Add PDF files to data/docs/ and retry.")
-        return _summary(0, 0, 0, 0, 0, pipeline_start, timings)
+        return _summary(0, 0, 0, 0, 0, 0, pipeline_start, timings)
 
     logger.info("Step 2/5 - Chunking text content...")
     step_start = time.perf_counter()

@@ -1,4 +1,7 @@
-import imghdr
+try:
+    import filetype as _filetype
+except ImportError:
+    _filetype = None
 import re
 from pathlib import Path
 
@@ -451,11 +454,11 @@ def _guess_image_extension(image_name: str, image_bytes: bytes) -> str:
     if suffix in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".webp"}:
         return suffix
 
-    kind = imghdr.what(None, image_bytes)
-    if kind == "jpeg":
-        return ".jpg"
-    if kind:
-        return f".{kind}"
+    if _filetype is not None:
+        kind = _filetype.guess(image_bytes)
+        if kind is not None:
+            ext = kind.extension
+            return ".jpg" if ext == "jpeg" else f".{ext}"
     return ".bin"
 
 

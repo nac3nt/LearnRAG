@@ -87,10 +87,18 @@ def chunk_pages(pages: list[dict]) -> list[dict]:
         raw_text = page.get("text", "")
         if not raw_text or not raw_text.strip():
             if config.DEBUG:
-                logger.debug(
-                    f"{page['filename']} p{page['page_number']} -> 0 text chunk(s) "
-                    "(empty text representation)"
-                )
+                content_type = page.get("content_type", "page_text")
+                if content_type == "image":
+                    logger.debug(
+                        f"{page['filename']} p{page['page_number']} "
+                        f"image {page.get('content_index', 0)} -> skipped from text retrieval "
+                        "(no caption configured — set IMAGE_CAPTION_PROVIDER to enable)"
+                    )
+                else:
+                    logger.debug(
+                        f"{page['filename']} p{page['page_number']} -> 0 text chunk(s) "
+                        "(empty text representation)"
+                    )
             continue
 
         content_type = page.get("content_type", "page_text")
